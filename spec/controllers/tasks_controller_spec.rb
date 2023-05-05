@@ -1,141 +1,64 @@
-require 'rails_helper'
+class TasksController < ApplicationController
+  def index
+    @tasks = Task.all
+    render 'tasks/index' # can be omitted
+  end
 
-RSpec.describe TasksController, type: :controller do
-  render_views
+  def index_by_current_user
+    token = cookies.signed[:todolist_session_token]
+    session = Session.find_by(token: token)
 
-  describe 'GET /tasks' do
-    it 'renders all tasks in JSON' do
-      user = FactoryBot.create(:user)
-      task1 = user.tasks.create(content: 'Task #1')
-      task2 = user.tasks.create(content: 'Task #2')
-
-      get :index
-
-      expected_response = {
-        tasks: [
-          {
-            id: task1.id,
-            content: task1.content,
-            completed: task1.completed,
-            created_at: task1.created_at
-          }, {
-            id: task2.id,
-            content: task2.content,
-            completed: task2.completed,
-            created_at: task2.created_at
-          }
-        ]
-      }
-
-      expect(response.body).to eq(expected_response.to_json)
+    if session
+      @tasks = session.user.tasks
+      render 'tasks/index' # can be omitted
+    else
+      render json: { tasks: [] }
     end
   end
 
-  describe 'GET /my_tasks' do
-    it 'renders all tasks of current user in JSON' do
-      user = FactoryBot.create(:user)
-      session = user.sessions.create
-      @request.cookie_jar.signed['todolist_session_token'] = session.token
-      task = user.tasks.create(content: 'Task #1')
+  def create
+    token = cookies.signed[:todolist_session_token]
+    session = Session.find_by(token: token)
 
-      other_user = FactoryBot.create(:user, username: 'other username')
-      other_user.tasks.create(content: 'Task #2')
+    if session
+      user = session.user
+      @task = user.tasks.new(task_params)
 
-      get :index_by_current_user
-
-      expected_response = {
-        tasks: [
-          {
-            id: task.id,
-            content: task.content,
-            completed: task.completed,
-            created_at: task.created_at
-          }
-        ]
-      }
-
-      expect(response.body).to eq(expected_response.to_json)
+      if @task.save
+        render 'tasks/create' # can be omitted
+      else
+        render json: { success: false }
+      end
+    else
+      render json: { success: false }
     end
   end
 
-  describe 'POST /tasks' do
-    it 'renders newly created task in JSON' do
-      user = FactoryBot.create(:user)
-      session = user.sessions.create
-      @request.cookie_jar.signed['todolist_session_token'] = session.token
+  def destroy
+    @task = Task.find_by(id: params[:id])
 
-      post :create, params: {
-        task: {
-          content: 'New Task'
-        }
-      }
-
-      expect(Task.count).to eq(1)
-
-      expect(response.body).to eq({
-        task: {
-          id: Task.first.id,
-          content: 'New Task',
-          completed: false,
-          created_at: Task.first.created_at
-        }
-      }.to_json)
+    if @task&.destroy
+      render json: { success: true }
+    else
+      render json: { success: false }
     end
   end
 
-  describe 'DELETE /tasks/:id' do
-    it 'renders success status' do
-      user = FactoryBot.create(:user)
-      task = user.tasks.create(content: 'Task Example')
+  def mark_complete
+    @task = Task.find_by(id: params[:id])
 
-      delete :destroy, params: { id: task.id }
-
-      expect(Task.count).to eq(0)
-      expect(response.body).to eq({ success: true }.to_json)
-    end
+    render 'tasks/update' if @task&.update(completed: true)
   end
 
-  describe 'PUT /tasks/:id/mark_complete' do
-    it 'renders modified task' do
-      user = FactoryBot.create(:user)
-      task = user.tasks.create(content: 'Task Example')
+  def mark_active
+    @task = Task.find_by(id: params[:id])
 
-      put :mark_complete, params: { id: task.id }
-
-      expect(Task.where(completed: true).count).to eq(1)
-
-      task.reload
-      expect(response.body).to eq({
-        task: {
-          id: task.id,
-          content: task.content,
-          completed: true,
-          created_at: task.created_at,
-          updated_at: task.updated_at
-        }
-      }.to_json)
-    end
+    render 'tasks/update' if @task&.update(completed: false)
   end
 
-  describe 'PUT /tasks/:id/mark_active' do
-    it 'renders modified task' do
-      user = FactoryBot.create(:user)
-      task = user.tasks.create(content: 'Task Example', completed: true)
+  private
 
-      put :mark_active, params: { id: task.id }
-
-      expect(Task.where(completed: false).count).to eq(1)
-
-      task.reload
-      expect(response.body).to eq({
-        task: {
-          id: task.id,
-          content: task.content,
-          completed: false,
-          created_at: task.created_at,
-          updated_at: task.updated_at
-        }
-      }.to_json)
-    end
+  def task_params
+    params.require(:task).permit(:content)
   end
 end
